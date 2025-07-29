@@ -1,0 +1,131 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+		"name": "Crypto Crash API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Get Wallet",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "x-user-id",
+						"value": "PASTE_USER_ID_FROM_SEED_SCRIPT_HERE",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:3000/api/wallet",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"wallet"
+					]
+				},
+				"description": "Fetches the wallet balance for the specified user."
+			},
+			"response": []
+		},
+		{
+			"name": "Place Bet",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "x-user-id",
+						"value": "PASTE_USER_ID_FROM_SEED_SCRIPT_HERE",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"amountUSD\": 10,\n    \"cryptoType\": \"BTC\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/bet",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"bet"
+					]
+				},
+				"description": "Places a bet during the betting phase of a round."
+			},
+			"response": []
+		},
+		{
+			"name": "Cash Out (HTTP)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "x-user-id",
+						"value": "PASTE_USER_ID_FROM_SEED_SCRIPT_HERE",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:3000/api/cashout",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"cashout"
+					]
+				},
+				"description": "Cashes out an active bet. This can also be done via WebSocket, which is the recommended method for low latency."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Game History",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "x-user-id",
+						"value": "PASTE_USER_ID_FROM_SEED_SCRIPT_HERE",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:3000/api/history",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"history"
+					]
+				},
+				"description": "Fetches the last 50 completed game rounds."
+			},
+			"response": []
+		}
+	]
+}

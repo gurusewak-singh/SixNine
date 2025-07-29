@@ -1,0 +1,14 @@
+# Ignore dependencies, which will be installed inside the container
+node_modules
+
+# Ignore local environment file, we will inject it via Docker Compose
+.env
+
+# Ignore Docker files
+Dockerfile
+docker-compose.yml
+
+# Ignore git and npm debug logs
+.git
+.gitignore
+npm-debug.log

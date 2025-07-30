@@ -1,8 +1,11 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 
-// Use the Pro API endpoint
-const COINGECKO_API_BASE_URL = 'https://pro-api.coingecko.com/api/v3/simple/price';
+// ====================================================================
+// THE FIX: Revert to the public API endpoint, not the Pro one.
+const COINGECKO_API_BASE_URL = 'https://api.coingecko.com/api/v3/simple/price';
+// ====================================================================
+
 const CACHE_TTL = 10000; // 10 seconds
 
 class CryptoService {
@@ -19,7 +22,6 @@ class CryptoService {
             return this.priceCache.data;
         }
 
-        // Check if the API key is provided in environment variables
         if (!process.env.COINGECKO_API_KEY) {
             logger.error('COINGECKO_API_KEY is not set in environment variables. Cannot fetch prices.');
             if (this.priceCache.data) return this.priceCache.data;
@@ -27,12 +29,8 @@ class CryptoService {
         }
 
         // ====================================================================
-        // THE FIX: Change the API key parameter name
-        //
-        // Incorrect: x_cg_demo_api_key
-        // Correct:   x_cg_pro_api_key
-        //
-        const fullUrl = `${COINGECKO_API_BASE_URL}?ids=bitcoin,ethereum&vs_currencies=usd&x_cg_pro_api_key=${process.env.COINGECKO_API_KEY}`;
+        // THE FIX: Use the correct parameter name for the public/demo API.
+        const fullUrl = `${COINGECKO_API_BASE_URL}?ids=bitcoin,ethereum&vs_currencies=usd&x_cg_demo_api_key=${process.env.COINGECKO_API_KEY}`;
         // ====================================================================
 
         try {
@@ -48,7 +46,6 @@ class CryptoService {
             logger.info(`Fetched new crypto prices: BTC=$${prices.BTC}, ETH=$${prices.ETH}`);
             return prices;
         } catch (error) {
-            // Provide more detailed error logging
             const errorMessage = error.response ? `Request failed with status code ${error.response.status}` : error.message;
             logger.error(`Error fetching crypto prices from CoinGecko: ${errorMessage}`);
             

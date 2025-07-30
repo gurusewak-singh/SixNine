@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 const provablyFairService = require('./provablyFair.service');
-const cryptoService = require('./crypto.service');
+const cryptoService = require('./crypto.service'); // Make sure this is imported
 const redis = require('./redis.service'); 
 
 const User = require('../models/user.model');
@@ -16,6 +16,7 @@ const MULTIPLIER_INCREMENT_INTERVAL = 100; // 100ms
 
 const GAME_STATE_KEY = 'game:state'; 
 const ACTIVE_BETS_KEY = 'game:active_bets'; 
+const GAME_PRICES_KEY = 'game:prices'; // NEW Redis key for prices
 
 class GameService {
     constructor(io) {
@@ -42,6 +43,20 @@ class GameService {
     }
 
     async startNewRound() {
+        // --- NEW PRICE FETCH LOGIC ---
+        let prices;
+        try {
+            prices = await cryptoService.getPrices();
+            // Store prices in Redis as a JSON string
+            await redis.set(GAME_PRICES_KEY, JSON.stringify(prices));
+        } catch (error) {
+            logger.error(`Failed to get prices for new round. Retrying in 10s. Error: ${error.message}`);
+            // If we can't get prices, the game cannot continue. We must retry.
+            setTimeout(() => this.startGameLoop(), 10000);
+            return; // Stop execution of this round
+        }
+        // --- END NEW LOGIC ---
+
         const roundId = uuidv4();
         const serverSeed = process.env.SERVER_SEED;
         const crashMultiplier = provablyFairService.calculateCrashMultiplier(serverSeed, roundId);
@@ -127,6 +142,14 @@ class GameService {
         if (autoCashoutAt && (isNaN(parseFloat(autoCashoutAt)) || autoCashoutAt <= 1.01)) {
             throw new Error('Auto-cashout multiplier must be a number greater than 1.01.');
         }
+        
+        // --- NEW: Get prices from Redis, not by calling the service ---
+        const pricesStr = await redis.get(GAME_PRICES_KEY);
+        if (!pricesStr) {
+            throw new Error('Crypto prices are not available for this round. Please try again.');
+        }
+        const prices = JSON.parse(pricesStr);
+        // --- END NEW ---
 
         const session = await mongoose.startSession();
         session.startTransaction();
@@ -136,7 +159,6 @@ class GameService {
                 throw new Error('Insufficient USD balance.');
             }
 
-            const prices = await cryptoService.getPrices();
             const cryptoPrice = prices[cryptoType];
             if (!cryptoPrice) throw new Error('Invalid crypto type.');
             const amountCrypto = parseFloat((amountUSD / cryptoPrice).toFixed(8));
@@ -221,7 +243,11 @@ class GameService {
 
             const winningsCrypto = bet.amountCrypto * cashoutMultiplier;
             
-            const prices = await cryptoService.getPrices();
+            const pricesStr = await redis.get(GAME_PRICES_KEY);
+            if (!pricesStr) {
+                throw new Error('Crypto prices are not available for this round. Cannot process cashout.');
+            }
+            const prices = JSON.parse(pricesStr);
             const cryptoPrice = prices[bet.cryptoType];
             const winningsUSD = parseFloat((winningsCrypto * cryptoPrice).toFixed(2));
 

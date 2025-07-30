@@ -1,7 +1,8 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 
-const COINGECKO_API_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd';
+// Use the Pro API endpoint
+const COINGECKO_API_BASE_URL = 'https://pro-api.coingecko.com/api/v3/simple/price';
 const CACHE_TTL = 10000; // 10 seconds
 
 class CryptoService {
@@ -18,8 +19,19 @@ class CryptoService {
             return this.priceCache.data;
         }
 
+        // Check if the API key is provided in environment variables
+        if (!process.env.COINGECKO_API_KEY) {
+            logger.error('COINGECKO_API_KEY is not set in environment variables. Cannot fetch prices.');
+            // Return cached data if available, otherwise throw
+            if (this.priceCache.data) return this.priceCache.data;
+            throw new Error('CoinGecko API key is missing.');
+        }
+
+        // Construct the full URL with query parameters
+        const fullUrl = `${COINGECKO_API_BASE_URL}?ids=bitcoin,ethereum&vs_currencies=usd&x_cg_pro_api_key=${process.env.COINGECKO_API_KEY}`;
+
         try {
-            const response = await axios.get(COINGECKO_API_URL);
+            const response = await axios.get(fullUrl);
             const prices = {
                 BTC: response.data.bitcoin.usd,
                 ETH: response.data.ethereum.usd,
@@ -31,12 +43,15 @@ class CryptoService {
             logger.info(`Fetched new crypto prices: BTC=$${prices.BTC}, ETH=$${prices.ETH}`);
             return prices;
         } catch (error) {
-            logger.error(`Error fetching crypto prices from CoinGecko: ${error.message}`);
-            // If API fails, return cached data if available, otherwise throw
+            // Provide more detailed error logging
+            const errorMessage = error.response ? `Request failed with status code ${error.response.status}` : error.message;
+            logger.error(`Error fetching crypto prices from CoinGecko: ${errorMessage}`);
+            
             if (this.priceCache.data) return this.priceCache.data;
             throw new Error('Could not fetch crypto prices.');
         }
     }
 }
 
+// Export a singleton instance
 module.exports = new CryptoService();

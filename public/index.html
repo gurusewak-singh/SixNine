@@ -110,9 +110,7 @@
         "
       >
         <h3 style="margin-top: 0">My Wallet</h3>
-        <div id="wallet-details">
-          Loading...
-        </div>
+        <div id="wallet-details">Loading...</div>
       </div>
 
       <div class="controls">
@@ -164,7 +162,7 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-
+      const BACKEND_URL = "https://sixnine-backend.onrender.com";
       const multiplierEl = document.getElementById("multiplier");
       const statusEl = document.getElementById("status");
       const logsEl = document.getElementById("logs");
@@ -199,7 +197,7 @@
         if (!userId) return;
 
         try {
-          const response = await fetch("/api/wallet", {
+          const response = await fetch(`${BACKEND_URL}/api/wallet`, {
             method: "GET",
             headers: { "x-user-id": userId },
           });
@@ -234,7 +232,7 @@
         }
         if (socket) socket.disconnect();
 
-        socket = io({ query: { userId } });
+        socket = io(BACKEND_URL, { query: { userId } });
         setupSocketListeners();
         userIdInput.disabled = true;
         connectBtn.textContent = "Connected";
@@ -245,7 +243,7 @@
         socket.on("connect", () => {
           logEvent("Connected to server!", "start");
           statusEl.textContent = "Waiting for next round...";
-          updateWalletDisplay(); 
+          updateWalletDisplay();
         });
 
         socket.on("game:start", (data) => {
@@ -279,7 +277,7 @@
           cashoutBtn.disabled = true;
           gameIsRunning = false;
           if (hasPlacedBet) {
-            setTimeout(updateWalletDisplay, 1000); 
+            setTimeout(updateWalletDisplay, 1000);
           }
         });
 
@@ -293,7 +291,7 @@
         });
 
         socket.on("player:cashout:success", () => {
-          updateWalletDisplay(); 
+          updateWalletDisplay();
         });
 
         socket.on("player:cashout:error", (data) => {
@@ -307,7 +305,7 @@
           userIdInput.disabled = false;
           connectBtn.textContent = "Connect";
           connectBtn.disabled = false;
-          walletDisplayEl.style.display = "none"; 
+          walletDisplayEl.style.display = "none";
         });
 
         socket.on("chat:message", (data) => {
@@ -325,7 +323,7 @@
         const autoCashoutAt = parseFloat(autoCashoutInput.value) || null;
 
         try {
-          const response = await fetch("/api/bet", {
+          const response = await fetch(`${BACKEND_URL}/api/bet`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -340,7 +338,7 @@
           logEvent(`Bet of $${amountUSD} placed successfully!`);
           hasPlacedBet = true;
           betBtn.disabled = true;
-          updateWalletDisplay(); 
+          updateWalletDisplay();
         } catch (error) {
           alert(`Bet failed: ${error.message}`);
         }

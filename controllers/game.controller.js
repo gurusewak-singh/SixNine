@@ -42,17 +42,19 @@ exports.getWallet = async (req, res) => {
         let ethValue = 0;
         let totalValue = user.wallet.usd;
 
-        // --- NEW: Get prices from Redis ---
         const pricesStr = await redis.get('game:prices');
         if (pricesStr) {
-            prices = JSON.parse(pricesStr);
-            btcValue = user.wallet.btc * prices.BTC;
-            ethValue = user.wallet.eth * prices.ETH;
-            totalValue += btcValue + ethValue;
+            try {
+                prices = JSON.parse(pricesStr);
+                btcValue = user.wallet.btc * prices.BTC;
+                ethValue = user.wallet.eth * prices.ETH;
+                totalValue += btcValue + ethValue;
+            } catch (e) {
+                logger.error("Failed to parse prices from Redis:", e);
+            }
         } else {
             logger.warn('Could not find prices in Redis for wallet view.');
         }
-        // --- END NEW ---
 
         res.status(200).json({
             ...user.toObject(),

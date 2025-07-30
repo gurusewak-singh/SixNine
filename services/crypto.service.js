@@ -9,10 +9,16 @@ class CryptoService {
             throw new Error('CoinGecko API key is missing.');
         }
 
-        const fullUrl = `${COINGECKO_API_BASE_URL}?ids=bitcoin,ethereum&vs_currencies=usd&x_cg_demo_api_key=${process.env.COINGECKO_API_KEY}`;
+        const url = `${COINGECKO_API_BASE_URL}?ids=bitcoin,ethereum&vs_currencies=usd`;
+
+        const config = {
+            headers: {
+                'x-cg-demo-api-key': process.env.COINGECKO_API_KEY
+            }
+        };
 
         try {
-            const response = await axios.get(fullUrl);
+            const response = await axios.get(url, config);
             const prices = {
                 BTC: response.data.bitcoin.usd,
                 ETH: response.data.ethereum.usd,

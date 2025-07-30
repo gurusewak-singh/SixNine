@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 const provablyFairService = require('./provablyFair.service');
-const cryptoService = require('./crypto.service'); // Make sure this is imported
+const cryptoService = require('./crypto.service');
 const redis = require('./redis.service'); 
 
 const User = require('../models/user.model');
@@ -16,7 +16,9 @@ const MULTIPLIER_INCREMENT_INTERVAL = 100; // 100ms
 
 const GAME_STATE_KEY = 'game:state'; 
 const ACTIVE_BETS_KEY = 'game:active_bets'; 
-const GAME_PRICES_KEY = 'game:prices'; // NEW Redis key for prices
+const GAME_PRICES_KEY = 'game:prices';
+const LAST_PRICE_FETCH_KEY = 'game:last_price_fetch'; // NEW Redis key
+const PRICE_CACHE_DURATION = 60 * 1000; // 60 seconds in milliseconds
 
 class GameService {
     constructor(io) {
@@ -43,19 +45,32 @@ class GameService {
     }
 
     async startNewRound() {
-        // --- NEW PRICE FETCH LOGIC ---
-        let prices;
-        try {
-            prices = await cryptoService.getPrices();
-            // Store prices in Redis as a JSON string
-            await redis.set(GAME_PRICES_KEY, JSON.stringify(prices));
-        } catch (error) {
-            logger.error(`Failed to get prices for new round. Retrying in 10s. Error: ${error.message}`);
-            // If we can't get prices, the game cannot continue. We must retry.
-            setTimeout(() => this.startGameLoop(), 10000);
-            return; // Stop execution of this round
+        // --- NEW 1-MINUTE CACHING LOGIC ---
+        const now = Date.now();
+        const lastFetch = await redis.get(LAST_PRICE_FETCH_KEY);
+
+        // Check if we need to fetch new prices
+        if (!lastFetch || (now - parseInt(lastFetch, 10) > PRICE_CACHE_DURATION)) {
+            logger.info('Price cache is stale. Fetching new prices from CryptoCompare...');
+            try {
+                const prices = await cryptoService.getPrices();
+                await redis.set(GAME_PRICES_KEY, JSON.stringify(prices));
+                await redis.set(LAST_PRICE_FETCH_KEY, now.toString());
+            } catch (error) {
+                logger.error(`CRITICAL: Failed to get prices for the game. The game will use stale prices if available. Error: ${error.message}`);
+                // If the fetch fails, we don't stop the game. We'll just use the old prices
+                // and try again in the next round. This makes the game more resilient.
+            }
         }
         // --- END NEW LOGIC ---
+
+        const pricesStr = await redis.get(GAME_PRICES_KEY);
+        if (!pricesStr) {
+            // This happens only on the very first run if the API fails.
+            logger.error("No prices available in cache. Pausing game for 10 seconds.");
+            setTimeout(() => this.startGameLoop(), 10000);
+            return;
+        }
 
         const roundId = uuidv4();
         const serverSeed = process.env.SERVER_SEED;
@@ -143,13 +158,11 @@ class GameService {
             throw new Error('Auto-cashout multiplier must be a number greater than 1.01.');
         }
         
-        // --- NEW: Get prices from Redis, not by calling the service ---
         const pricesStr = await redis.get(GAME_PRICES_KEY);
         if (!pricesStr) {
             throw new Error('Crypto prices are not available for this round. Please try again.');
         }
         const prices = JSON.parse(pricesStr);
-        // --- END NEW ---
 
         const session = await mongoose.startSession();
         session.startTransaction();

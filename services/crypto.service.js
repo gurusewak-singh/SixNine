@@ -39,5 +39,4 @@ class CryptoService {
     }
 }
 
-// Export a singleton instance
 module.exports = new CryptoService();

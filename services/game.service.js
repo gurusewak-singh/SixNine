@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 const provablyFairService = require('./provablyFair.service');
 const cryptoService = require('./crypto.service');
+const redis = require('./redis.service'); 
 
 const User = require('../models/user.model');
 const GameRound = require('../models/gameRound.model');
@@ -13,17 +14,20 @@ const BETTING_PHASE_DURATION = 4000; // 4 seconds
 const PENDING_PHASE_DURATION = 6000; // 6 seconds
 const MULTIPLIER_INCREMENT_INTERVAL = 100; // 100ms
 
+const GAME_STATE_KEY = 'game:state'; 
+const ACTIVE_BETS_KEY = 'game:active_bets'; 
+
 class GameService {
     constructor(io) {
         this.io = io;
-        this.state = {
-            status: 'crashed', // 'pending', 'running', 'crashed'
-            currentRound: null,
-            currentMultiplier: 1.00,
-            startTime: null,
-            crashMultiplier: null,
-            multiplierInterval: null,
-        };
+    }
+
+    async getGameState() {
+        const state = await redis.hgetall(GAME_STATE_KEY);
+        if (state.currentMultiplier) state.currentMultiplier = parseFloat(state.currentMultiplier);
+        if (state.crashMultiplier) state.crashMultiplier = parseFloat(state.crashMultiplier);
+        if (state.startTime) state.startTime = parseInt(state.startTime, 10);
+        return state;
     }
 
     async startGameLoop() {
@@ -38,22 +42,20 @@ class GameService {
     }
 
     async startNewRound() {
-        this.state.status = 'pending';
         const roundId = uuidv4();
         const serverSeed = process.env.SERVER_SEED;
         const crashMultiplier = provablyFairService.calculateCrashMultiplier(serverSeed, roundId);
 
-        const newRound = new GameRound({
-            roundId,
-            serverSeed, // In a real system, you'd use a chain of seeds
-            crashMultiplier,
-        });
+        const newRound = new GameRound({ roundId, serverSeed, crashMultiplier });
         await newRound.save();
 
-        this.state.currentRound = newRound;
-        this.state.crashMultiplier = crashMultiplier;
-        this.state.currentMultiplier = 1.00;
-        
+        await redis.hmset(GAME_STATE_KEY, {
+            status: 'pending',
+            currentRoundId: newRound._id.toString(),
+            crashMultiplier,
+            currentMultiplier: 1.00,
+        });
+
         logger.info(`New round #${newRound._id} created. Crash at ${crashMultiplier}x. Betting is open.`);
 
         this.io.emit('game:start', {
@@ -62,49 +64,68 @@ class GameService {
         });
     }
 
-    runGame() {
-        this.state.status = 'running';
-        this.state.startTime = Date.now();
-        logger.info(`Round #${this.state.currentRound._id} is now running.`);
+    async runGame() {
+        await redis.hmset(GAME_STATE_KEY, {
+            status: 'running',
+            startTime: Date.now(),
+        });
+        logger.info(`Round is now running.`);
+        this.runMultiplierLoop();
+    }
 
-        this.state.multiplierInterval = setInterval(() => {
-            const elapsedTime = Date.now() - this.state.startTime;
-            // Exponential growth factor
-            const growthFactor = 0.00006;
-            this.state.currentMultiplier = parseFloat(Math.pow(Math.E, growthFactor * elapsedTime).toFixed(2));
+    async runMultiplierLoop() {
+        const gameState = await this.getGameState();
+        if (gameState.status !== 'running') return;
 
-            if (this.state.currentMultiplier >= this.state.crashMultiplier) {
-                this.endRound();
-            } else {
-                this.io.emit('game:multiplier', { multiplier: this.state.currentMultiplier });
-            }
-        }, MULTIPLIER_INCREMENT_INTERVAL);
+        const elapsedTime = Date.now() - gameState.startTime;
+        const growthFactor = 0.00006;
+        const newMultiplier = parseFloat(Math.pow(Math.E, growthFactor * elapsedTime).toFixed(2));
+
+        if (newMultiplier >= gameState.crashMultiplier) {
+            this.endRound();
+            return;
+        }
+
+        await redis.hset(GAME_STATE_KEY, 'currentMultiplier', newMultiplier);
+        this.io.emit('game:multiplier', { multiplier: newMultiplier });
+
+        await this.processAutoCashouts(newMultiplier);
+
+        setTimeout(() => this.runMultiplierLoop(), MULTIPLIER_INCREMENT_INTERVAL);
     }
 
     async endRound() {
-        if (this.state.multiplierInterval) {
-            clearInterval(this.state.multiplierInterval);
-            this.state.multiplierInterval = null;
-        }
+        const gameState = await this.getGameState();
+        if (gameState.status === 'crashed') return; 
 
-        this.state.status = 'crashed';
-        logger.info(`Round #${this.state.currentRound._id} CRASHED at ${this.state.crashMultiplier}x`);
-        
-        this.io.emit('game:crash', { multiplier: this.state.crashMultiplier });
+        await redis.hset(GAME_STATE_KEY, 'status', 'crashed');
+        logger.info(`Round CRASHED at ${gameState.crashMultiplier}x`);
 
-        await GameRound.findByIdAndUpdate(this.state.currentRound._id, { status: 'crashed' });
-        await this.resolveLosingBets();
+        this.io.emit('game:multiplier', { multiplier: gameState.crashMultiplier });
 
-        // Start next round after a delay
+        setTimeout(() => {
+            this.io.emit('game:crash', { multiplier: gameState.crashMultiplier });
+        }, 50); 
+
+        await GameRound.findByIdAndUpdate(gameState.currentRoundId, { status: 'crashed' });
+        await this.resolveLosingBets(gameState.currentRoundId);
+
+        await redis.del(ACTIVE_BETS_KEY);
+
         setTimeout(() => this.startGameLoop(), PENDING_PHASE_DURATION);
     }
 
-    async placeBet(userId, amountUSD, cryptoType) {
-        if (this.state.status !== 'pending') {
+    async placeBet(userId, amountUSD, cryptoType, autoCashoutAt = null) {
+        const gameState = await this.getGameState();
+        if (gameState.status !== 'pending') {
             throw new Error('Betting is closed for this round.');
         }
         if (amountUSD < 1) {
             throw new Error('Minimum bet is $1.');
+        }
+
+        if (autoCashoutAt && (isNaN(parseFloat(autoCashoutAt)) || autoCashoutAt <= 1.01)) {
+            throw new Error('Auto-cashout multiplier must be a number greater than 1.01.');
         }
 
         const session = await mongoose.startSession();
@@ -126,12 +147,17 @@ class GameService {
 
             const bet = new Bet({
                 user: userId,
-                gameRound: this.state.currentRound._id,
+                gameRound: gameState.currentRoundId,
                 amountUSD,
                 amountCrypto,
                 cryptoType,
+                autoCashoutAt 
             });
             await bet.save({ session });
+            
+            if (autoCashoutAt) {
+                await redis.hset(ACTIVE_BETS_KEY, userId.toString(), autoCashoutAt);
+            }
 
             const transaction = new Transaction({
                 user: userId,
@@ -155,17 +181,37 @@ class GameService {
         }
     }
 
-    async cashout(userId) {
-        if (this.state.status !== 'running') {
+    async processAutoCashouts(currentMultiplier) {
+        const activeBets = await redis.hgetall(ACTIVE_BETS_KEY);
+        for (const userId in activeBets) {
+            const cashoutAt = parseFloat(activeBets[userId]);
+            if (currentMultiplier >= cashoutAt) {
+                try {
+                    logger.info(`Auto-cashing out user ${userId} at ${currentMultiplier}x`);
+                    await this.cashout(userId, cashoutAt); 
+                    await redis.hdel(ACTIVE_BETS_KEY, userId); 
+                } catch (error) {
+                    logger.warn(`Auto-cashout failed for user ${userId}: ${error.message}`);
+                    await redis.hdel(ACTIVE_BETS_KEY, userId);
+                }
+            }
+        }
+    }
+
+    async cashout(userId, forcedMultiplier = null) {
+        const gameState = await this.getGameState();
+        if (gameState.status !== 'running') {
             throw new Error('Cannot cash out. Game is not running.');
         }
+        
+        const cashoutMultiplier = forcedMultiplier || gameState.currentMultiplier;
         
         const session = await mongoose.startSession();
         session.startTransaction();
         try {
             const bet = await Bet.findOne({
                 user: userId,
-                gameRound: this.state.currentRound._id,
+                gameRound: gameState.currentRoundId,
                 status: 'placed'
             }).session(session);
 
@@ -173,7 +219,6 @@ class GameService {
                 throw new Error('No active bet found for this round.');
             }
 
-            const cashoutMultiplier = this.state.currentMultiplier;
             const winningsCrypto = bet.amountCrypto * cashoutMultiplier;
             
             const prices = await cryptoService.getPrices();
@@ -181,8 +226,8 @@ class GameService {
             const winningsUSD = parseFloat((winningsCrypto * cryptoPrice).toFixed(2));
 
             const user = await User.findById(userId).session(session);
-            user.wallet[bet.cryptoType.toLowerCase()] -= bet.amountCrypto; // Remove original stake
-            user.wallet.usd += winningsUSD; // Add winnings in USD
+            user.wallet[bet.cryptoType.toLowerCase()] -= bet.amountCrypto; 
+            user.wallet.usd += winningsUSD; 
             await user.save({ session });
 
             bet.status = 'cashed_out';
@@ -208,6 +253,9 @@ class GameService {
             });
 
             logger.info(`User ${userId} cashed out at ${cashoutMultiplier}x for $${winningsUSD}`);
+            
+            await redis.hdel(ACTIVE_BETS_KEY, userId.toString());
+
             return { cashoutMultiplier, winningsUSD };
 
         } catch (error) {
@@ -219,13 +267,13 @@ class GameService {
         }
     }
 
-    async resolveLosingBets() {
+    async resolveLosingBets(currentRoundId) {
         try {
             await Bet.updateMany(
-                { gameRound: this.state.currentRound._id, status: 'placed' },
+                { gameRound: currentRoundId, status: 'placed' },
                 { $set: { status: 'lost' } }
             );
-            logger.info(`Resolved losing bets for round #${this.state.currentRound._id}`);
+            logger.info(`Resolved losing bets for round #${currentRoundId}`);
         } catch (error) {
             logger.error(`Error resolving losing bets: ${error.message}`);
         }

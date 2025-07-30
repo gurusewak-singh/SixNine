@@ -1,32 +1,16 @@
-version: '3.8'
+# This file defines ONLY the Redis service.
+# The Node.js app runs locally, and MongoDB is on Atlas.
 
 services:
-  # Our Node.js backend service
-  backend:
-    build: . # Build the image from the Dockerfile in the current directory
-    container_name: crypto-crash-backend
+  redis:
+    image: redis:7-alpine
+    container_name: crypto-crash-redis
     ports:
-      - "3000:3000" # Map host port 3000 to container port 3000
-    env_file:
-      - ./.env # Load environment variables from the .env file
-    depends_on:
-      - db # Wait for the 'db' service to be ready before starting
+      # Exposes the Redis container's port 6379 to your computer's port 6379
+      - "6379:6379"
     volumes:
-      # For development, mount local code into the container for live updates
-      # NOTE: For production, you would remove this volume mount
-      - .:/app
-      # Use a named volume for node_modules to avoid overwriting it
-      - /app/node_modules
+      # Persists Redis data so it's not lost when the container stops
+      - redisdata:/data
 
-  # Our MongoDB database service
-  db:
-    image: mongo:6.0 # Use the official MongoDB 6.0 image
-    container_name: crypto-crash-db
-    ports:
-      - "27017:27017" # Map host port 27017 to container port 27017
-    volumes:
-      - mongodata:/data/db # Persist database data using a named volume
-
-# Define the named volume for data persistence
 volumes:
-  mongodata:
+  redisdata:

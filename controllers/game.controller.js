@@ -2,22 +2,14 @@ const GameService = require('../services/game.service');
 const User = require('../models/user.model');
 const logger = require('../utils/logger');
 
-// Note: In a real app, the gameService would be injected via dependency injection.
-// For simplicity, we'll rely on the singleton nature of our server setup.
-// This controller is a thin layer to handle HTTP requests.
-
 exports.placeBet = async (req, res) => {
     try {
-        const { amountUSD, cryptoType } = req.body;
+        // Validate request body
+        const { amountUSD, cryptoType, autoCashoutAt } = req.body;
         const userId = req.user._id;
-
-        // The actual gameService instance is managed in server.js
-        // This is a conceptual link. The real interaction happens in the route handler.
-        // We'll pass the gameService instance from the request object.
         const gameService = req.app.get('gameService');
-        if (!gameService) return res.status(500).json({ message: 'Game service not available' });
-
-        const bet = await gameService.placeBet(userId, amountUSD, cryptoType);
+        
+        const bet = await gameService.placeBet(userId, amountUSD, cryptoType, autoCashoutAt);
         res.status(201).json({ message: 'Bet placed successfully', bet });
     } catch (error) {
         res.status(400).json({ message: error.message });

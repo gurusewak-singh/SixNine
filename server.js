@@ -10,13 +10,22 @@ const GameService = require('./services/game.service');
 const socketHandler = require('./sockets/socket');
 const authMiddleware = require('./middleware/auth.middleware');
 
+const { createAdapter } = require('@socket.io/redis-adapter');
+const { Emitter } = require("@socket.io/redis-emitter");
+const redisClient = require('./services/redis.service');
+
 // Initialize App
 const app = express();
 const server = http.createServer(app);
+
+const pubClient = redisClient;
+const subClient = pubClient.duplicate();
+
 const io = new Server(server, {
     cors: {
         origin: "*", // In production, restrict this to your frontend domain
-        methods: ["GET", "POST"]
+        methods: ["GET", "POST"],
+        adapter: createAdapter(pubClient, subClient)
     }
 });
 

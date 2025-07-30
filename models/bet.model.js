@@ -7,6 +7,7 @@ const betSchema = new mongoose.Schema({
     amountCrypto: { type: Number, required: true },
     cryptoType: { type: String, enum: ['BTC', 'ETH'], required: true },
     cashoutMultiplier: { type: Number, default: null },
+    autoCashoutAt: { type: Number, default: null },
     status: {
         type: String,
         enum: ['placed', 'cashed_out', 'lost'],

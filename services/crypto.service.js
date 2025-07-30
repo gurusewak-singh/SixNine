@@ -22,13 +22,18 @@ class CryptoService {
         // Check if the API key is provided in environment variables
         if (!process.env.COINGECKO_API_KEY) {
             logger.error('COINGECKO_API_KEY is not set in environment variables. Cannot fetch prices.');
-            // Return cached data if available, otherwise throw
             if (this.priceCache.data) return this.priceCache.data;
             throw new Error('CoinGecko API key is missing.');
         }
 
-        // Construct the full URL with query parameters
+        // ====================================================================
+        // THE FIX: Change the API key parameter name
+        //
+        // Incorrect: x_cg_demo_api_key
+        // Correct:   x_cg_pro_api_key
+        //
         const fullUrl = `${COINGECKO_API_BASE_URL}?ids=bitcoin,ethereum&vs_currencies=usd&x_cg_pro_api_key=${process.env.COINGECKO_API_KEY}`;
+        // ====================================================================
 
         try {
             const response = await axios.get(fullUrl);

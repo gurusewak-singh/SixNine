@@ -45,11 +45,11 @@ class GameService {
     }
 
     async startNewRound() {
-        // --- NEW 1-MINUTE CACHING LOGIC ---
+        
         const now = Date.now();
         const lastFetch = await redis.get(LAST_PRICE_FETCH_KEY);
 
-        // Check if we need to fetch new prices
+        // Check if need to fetch new prices
         if (!lastFetch || (now - parseInt(lastFetch, 10) > PRICE_CACHE_DURATION)) {
             logger.info('Price cache is stale. Fetching new prices from CryptoCompare...');
             try {
@@ -58,11 +58,8 @@ class GameService {
                 await redis.set(LAST_PRICE_FETCH_KEY, now.toString());
             } catch (error) {
                 logger.error(`CRITICAL: Failed to get prices for the game. The game will use stale prices if available. Error: ${error.message}`);
-                // If the fetch fails, we don't stop the game. We'll just use the old prices
-                // and try again in the next round. This makes the game more resilient.
             }
         }
-        // --- END NEW LOGIC ---
 
         const pricesStr = await redis.get(GAME_PRICES_KEY);
         if (!pricesStr) {
